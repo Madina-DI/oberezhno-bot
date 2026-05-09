@@ -1,54 +1,46 @@
 require('dotenv').config();
 
+const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
-const cron = require('node-cron');
-const messages = require('./messages.json');
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, {
   polling: true,
 });
 
-const chatId = process.env.CHAT_ID;
+const subscribersFile = './subscribers.json';
 
-function getRandomMessage(type) {
-  const arr = messages[type];
-  return arr[Math.floor(Math.random() * arr.length)];
+function loadSubscribers() {
+  if (!fs.existsSync(subscribersFile)) {
+    fs.writeFileSync(subscribersFile, JSON.stringify([]));
+  }
+
+  return JSON.parse(fs.readFileSync(subscribersFile));
 }
 
-function sendMessage(type) {
-  const text = getRandomMessage(type);
-  bot.sendMessage(chatId, text);
+function saveSubscribers(subscribers) {
+  fs.writeFileSync(subscribersFile, JSON.stringify(subscribers, null, 2));
 }
 
-// /start
+function addSubscriber(chatId) {
+  const subscribers = loadSubscribers();
+
+  if (!subscribers.includes(chatId)) {
+    subscribers.push(chatId);
+    saveSubscribers(subscribers);
+  }
+}
+
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'Обережно 🤍 Я буду присылать тебе послания утром, днём и вечером.');
+  addSubscriber(msg.chat.id);
+
+  bot.sendMessage(
+    msg.chat.id,
+    'Обережно 🤍 Ты подписана. Я буду присылать тебе послания утром, днём и вечером.'
+  );
 });
 
-// тестовая команда
 bot.onText(/\/test/, (msg) => {
   bot.sendMessage(msg.chat.id, 'Бот работает 🤍');
-});
-
-// утро — 08:00
-cron.schedule('0 8 * * *', () => {
-  sendMessage('morning');
-}, {
-  timezone: 'Europe/Moscow'
-});
-
-// день — 14:00
-cron.schedule('0 14 * * *', () => {
-  sendMessage('day');
-}, {
-  timezone: 'Europe/Moscow'
-});
-
-// вечер — 22:00
-cron.schedule('0 22 * * *', () => {
-  sendMessage('evening');
-}, {
-  timezone: 'Europe/Moscow'
 });
 
 console.log('Bot started...');
