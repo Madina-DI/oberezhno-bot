@@ -1,5 +1,16 @@
 require('dotenv').config();
 
+const http = require('http');
+
+const PORT = process.env.PORT || 3000;
+
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Oberezhno bot is running 🤍');
+}).listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
 const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
 
