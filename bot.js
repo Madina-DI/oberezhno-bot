@@ -46,20 +46,39 @@ function getRandomMessage(type) {
   const arr = messages[type];
 
   if (!arr || arr.length === 0) {
-    return 'Послание скоро появится 🤍';
+    return {
+      text: 'Послание скоро появится 🤍',
+      image: null
+    };
   }
 
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function sendOneMessage(chatId, message) {
+  if (message.image) {
+    return bot.sendPhoto(
+      chatId,
+      fs.createReadStream(message.image),
+      {
+        caption: message.text
+      }
+    );
+  }
+
+  return bot.sendMessage(chatId, message.text);
+}
+
 function sendMessageToAll(type) {
   const subscribers = loadSubscribers();
-  const text = getRandomMessage(type);
+  const message = getRandomMessage(type);
 
-  console.log(`[${new Date().toISOString()}] Sending ${type}: ${text}`);
+  console.log(
+    `[${new Date().toISOString()}] Sending ${type}: ${message.text}`
+  );
 
   subscribers.forEach((chatId) => {
-    bot.sendMessage(chatId, text).catch((error) => {
+    sendOneMessage(chatId, message).catch((error) => {
       console.error(`Ошибка для ${chatId}:`, error.message);
     });
   });
@@ -70,7 +89,7 @@ bot.onText(/\/start/, (msg) => {
 
   bot.sendMessage(
     msg.chat.id,
-    'Добро пожаловать в бережное пространство. Позволь мне мягко возвращать тебя к себе, своему телу и чувственности.'
+    'Добро пожаловать в бережное пространство 🤍\n\nПозволь мне мягко возвращать тебя к себе, своему телу и чувственности.'
   );
 });
 
@@ -79,20 +98,36 @@ bot.onText(/\/test/, (msg) => {
 });
 
 bot.onText(/\/evening/, (msg) => {
-  bot.sendMessage(msg.chat.id, getRandomMessage('evening'));
+  const message = getRandomMessage('evening');
+
+  sendOneMessage(msg.chat.id, message).catch((error) => {
+    console.error('Ошибка /evening:', error.message);
+  });
 });
 
-cron.schedule('0 8 * * *', () => {
-  sendMessageToAll('morning');
-}, { timezone });
+cron.schedule(
+  '0 8 * * *',
+  () => {
+    sendMessageToAll('morning');
+  },
+  { timezone }
+);
 
-cron.schedule('0 14 * * *', () => {
-  sendMessageToAll('day');
-}, { timezone });
+cron.schedule(
+  '0 14 * * *',
+  () => {
+    sendMessageToAll('day');
+  },
+  { timezone }
+);
 
-cron.schedule('0 22 * * *', () => {
-  sendMessageToAll('evening');
-}, { timezone });
+cron.schedule(
+  '0 22 * * *',
+  () => {
+    sendMessageToAll('evening');
+  },
+  { timezone }
+);
 
 console.log('Bot started...');
 console.log(`Timezone: ${timezone}`);
