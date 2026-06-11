@@ -99,6 +99,7 @@ async function sendMessageToAll(type) {
     `[${new Date().toISOString()}] Sending ${type}: ${message.text}`
   );
   console.log(`Subscribers count: ${subscribers.length}`);
+  console.log('Subscribers:', subscribers)
 
   subscribers.forEach((chatId) => {
     sendOneMessage(chatId, message).catch((error) => {
