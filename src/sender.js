@@ -33,8 +33,10 @@ function isGone({ code, description }) {
 }
 
 async function sendOneMessage(bot, chatId, message) {
+  const extra = message.replyMarkup ? { reply_markup: message.replyMarkup } : {};
+
   if (!message.image) {
-    return bot.sendMessage(chatId, message.text);
+    return bot.sendMessage(chatId, message.text, extra);
   }
 
   const cachedFileId = fileIdCache.get(message.image);
@@ -43,6 +45,7 @@ async function sendOneMessage(bot, chatId, message) {
     try {
       return await bot.sendPhoto(chatId, cachedFileId, {
         caption: message.text,
+        ...extra,
       });
     } catch (error) {
       // file_id мог протухнуть — сбрасываем кэш и грузим файл заново
@@ -53,6 +56,7 @@ async function sendOneMessage(bot, chatId, message) {
 
   const sent = await bot.sendPhoto(chatId, fs.createReadStream(message.image), {
     caption: message.text,
+    ...extra,
   });
 
   const photo = sent && sent.photo && sent.photo[sent.photo.length - 1];
@@ -91,12 +95,15 @@ async function sendWithRetry(bot, chatId, message) {
   return 'error';
 }
 
+// message — либо готовое послание для всех, либо функция (chatId) => послание,
+// если текст зависит от подписчицы (например, вечерний отклик на утренний ответ)
 async function sendMessageToAll(bot, message) {
   const subscribers = await loadSubscribers();
   const stats = { ok: 0, gone: 0, error: 0 };
+  const buildMessage = typeof message === 'function' ? message : () => message;
 
   for (const chatId of subscribers) {
-    const result = await sendWithRetry(bot, chatId, message);
+    const result = await sendWithRetry(bot, chatId, buildMessage(chatId));
     stats[result] += 1;
 
     if (result === 'gone') {

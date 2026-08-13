@@ -5,8 +5,10 @@ const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
 
 const { addSubscriber, removeSubscriber, countSubscribers } = require('./src/db');
-const { getRandomMessage } = require('./src/content');
+const { getNextMessage, deckStatus } = require('./src/content');
 const { sendOneMessage, sendMessageToAll } = require('./src/sender');
+const { setAnswer, getAnswer, countToday } = require('./src/mood');
+const { nextQuestion, findOption, randomFreeTextReply } = require('./src/questions');
 
 const PORT = process.env.PORT || 3000;
 const timezone = 'Europe/Moscow';
@@ -39,13 +41,54 @@ bot.on('polling_error', (error) => {
   console.error('Ошибка polling:', error.message);
 });
 
+// Утреннее послание заканчивается вопросом с кнопками. Вопрос каждое утро
+// новый — про чувства, про внимание, про тело.
+function withQuestion(message) {
+  const question = nextQuestion();
+
+  return {
+    ...message,
+    text: `${message.text}\n\n${question.text}`,
+    replyMarkup: {
+      inline_keyboard: [
+        question.options.map((option, optionIndex) => ({
+          text: option.label,
+          callback_data: `q:${question.index}:${optionIndex}`,
+        })),
+      ],
+    },
+  };
+}
+
+// Вечернее послание начинается с отклика на то, что она ответила утром
+function withEveningIntro(message, chatId) {
+  const answer = getAnswer(chatId);
+
+  if (!answer) return message;
+
+  const option = findOption(answer.questionIndex, answer.optionIndex);
+
+  if (!option || !option.evening) return message;
+
+  return { ...message, text: `${option.evening}\n\n${message.text}` };
+}
+
 async function broadcast(type) {
-  const message = getRandomMessage(type);
+  const message = getNextMessage(type);
 
   console.log(`[${new Date().toISOString()}] Sending ${type}: ${message.text}`);
 
+  let payload = message;
+
+  if (type === 'morning') {
+    payload = withQuestion(message);
+  } else if (type === 'evening') {
+    console.log(`Ответили утром: ${countToday()}`);
+    payload = (chatId) => withEveningIntro(message, chatId);
+  }
+
   try {
-    const stats = await sendMessageToAll(bot, message);
+    const stats = await sendMessageToAll(bot, payload);
     console.log(
       `Рассылка ${type}: всего ${stats.total}, доставлено ${stats.ok}, ` +
       `удалено ${stats.gone}, ошибок ${stats.error}`
@@ -57,12 +100,62 @@ async function broadcast(type) {
 
 // Ручная отправка одного послания тому, кто вызвал команду
 async function sendPreview(chatId, type) {
+  const message = getNextMessage(type);
+
   try {
-    await sendOneMessage(bot, chatId, getRandomMessage(type));
+    if (type === 'morning') {
+      await sendOneMessage(bot, chatId, withQuestion(message));
+    } else if (type === 'evening') {
+      await sendOneMessage(bot, chatId, withEveningIntro(message, chatId));
+    } else {
+      await sendOneMessage(bot, chatId, message);
+    }
   } catch (error) {
     console.error(`Ошибка /${type}:`, error.message);
   }
 }
+
+bot.on('callback_query', (query) => {
+  const match = /^q:(\d+):(\d+)$/.exec(query.data || '');
+
+  if (!match) return;
+
+  const questionIndex = Number(match[1]);
+  const optionIndex = Number(match[2]);
+  const chatId = query.message.chat.id;
+  const option = findOption(questionIndex, optionIndex);
+
+  if (!option) return;
+
+  setAnswer(chatId, questionIndex, optionIndex);
+  console.log(`Ответ на утренний вопрос: ${chatId} → ${option.label}`);
+
+  bot.answerCallbackQuery(query.id).catch(() => {});
+
+  // убираем кнопки, чтобы ответить можно было только один раз
+  bot.editMessageReplyMarkup(
+    { inline_keyboard: [] },
+    { chat_id: chatId, message_id: query.message.message_id }
+  ).catch(() => {});
+
+  if (option.ack) {
+    bot.sendMessage(chatId, option.ack).catch((error) => {
+      console.error('Ошибка отклика:', error.message);
+    });
+  }
+});
+
+// Если написала своими словами, а не кнопкой — не молчим в ответ.
+// Сам текст не сохраняем и не логируем: это её личное.
+bot.on('message', (msg) => {
+  if (!msg.text || msg.text.startsWith('/')) return;
+
+  console.log(`Свободный ответ от ${msg.chat.id}`);
+
+  bot.sendMessage(msg.chat.id, randomFreeTextReply()).catch((error) => {
+    console.error('Ошибка ответа на сообщение:', error.message);
+  });
+});
 
 bot.onText(/^\/start\b/, async (msg) => {
   await addSubscriber(msg.chat.id);
@@ -95,10 +188,19 @@ bot.onText(/^\/test\b/, (msg) => {
 
 bot.onText(/^\/count\b/, async (msg) => {
   const count = await countSubscribers();
+  const decks = deckStatus()
+    .map(({ type, total, left }) => `${type}: осталось ${left} из ${total}`)
+    .join('\n');
 
   bot.sendMessage(
     msg.chat.id,
-    count === null ? 'Не удалось посчитать 🤍' : `Сейчас подписано: ${count}`
+    [
+      count === null ? 'Не удалось посчитать 🤍' : `Сейчас подписано: ${count}`,
+      `Ответили сегодня: ${countToday()}`,
+      '',
+      'Колода посланий:',
+      decks,
+    ].join('\n')
   );
 });
 
