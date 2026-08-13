@@ -1,19 +1,23 @@
 require('dotenv').config();
 
 const http = require('http');
-const fs = require('fs');
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
-const { createClient } = require('@supabase/supabase-js');
-const messages = require('./messages.json');
+
+const { addSubscriber, removeSubscriber, countSubscribers } = require('./src/db');
+const { getRandomMessage } = require('./src/content');
+const { sendOneMessage, sendMessageToAll } = require('./src/sender');
 
 const PORT = process.env.PORT || 3000;
 const timezone = 'Europe/Moscow';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
+const requiredEnv = ['BOT_TOKEN', 'SUPABASE_URL', 'SUPABASE_KEY'];
+const missingEnv = requiredEnv.filter((key) => !process.env[key]);
+
+if (missingEnv.length > 0) {
+  console.error(`Не заданы переменные окружения: ${missingEnv.join(', ')}`);
+  process.exit(1);
+}
 
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -26,129 +30,101 @@ const bot = new TelegramBot(process.env.BOT_TOKEN, {
   polling: true,
 });
 
-async function loadSubscribers() {
-  const { data, error } = await supabase
-    .from('subscribers')
-    .select('chat_id');
-
-  if (error) {
-    console.error('Ошибка загрузки подписчиков:', error.message);
-    return [];
-  }
-
-  return data.map((item) => item.chat_id);
-}
-
-async function addSubscriber(chatId) {
-  const { data: existing, error: selectError } = await supabase
-    .from('subscribers')
-    .select('chat_id')
-    .eq('chat_id', chatId)
-    .maybeSingle();
-
-  if (selectError) {
-    console.error('Ошибка проверки подписчика:', selectError.message);
+bot.on('polling_error', (error) => {
+  if (error.message.includes('409')) {
+    console.error('409: бот запущен где-то ещё (локально и на Render одновременно?)');
     return;
   }
 
-  if (existing) {
-    console.log(`Subscriber already exists: ${chatId}`);
-    return;
-  }
+  console.error('Ошибка polling:', error.message);
+});
 
-  const { error: insertError } = await supabase
-    .from('subscribers')
-    .insert([{ chat_id: chatId }]);
-
-  if (insertError) {
-    console.error('Ошибка добавления подписчика:', insertError.message);
-    return;
-  }
-
-  console.log(`New subscriber added: ${chatId}`);
-}
-
-function getRandomMessage(type) {
-  const arr = messages[type];
-
-  if (!arr || arr.length === 0) {
-    return {
-      text: 'Послание скоро появится 🤍',
-      image: null
-    };
-  }
-
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function sendOneMessage(chatId, message) {
-  if (message.image) {
-    return bot.sendPhoto(chatId, fs.createReadStream(message.image), {
-      caption: message.text
-    });
-  }
-
-  return bot.sendMessage(chatId, message.text);
-}
-
-async function sendMessageToAll(type) {
-  const subscribers = await loadSubscribers();
+async function broadcast(type) {
   const message = getRandomMessage(type);
 
-  console.log(
-    `[${new Date().toISOString()}] Sending ${type}: ${message.text}`
-  );
-  console.log(`Subscribers count: ${subscribers.length}`);
-  console.log('Subscribers:', subscribers)
+  console.log(`[${new Date().toISOString()}] Sending ${type}: ${message.text}`);
 
-  subscribers.forEach((chatId) => {
-    sendOneMessage(chatId, message).catch((error) => {
-      console.error(`Ошибка для ${chatId}:`, error.message);
-    });
-  });
+  try {
+    const stats = await sendMessageToAll(bot, message);
+    console.log(
+      `Рассылка ${type}: всего ${stats.total}, доставлено ${stats.ok}, ` +
+      `удалено ${stats.gone}, ошибок ${stats.error}`
+    );
+  } catch (error) {
+    console.error(`Рассылка ${type} упала:`, error.message);
+  }
 }
 
-bot.onText(/\/start/, async (msg) => {
+// Ручная отправка одного послания тому, кто вызвал команду
+async function sendPreview(chatId, type) {
+  try {
+    await sendOneMessage(bot, chatId, getRandomMessage(type));
+  } catch (error) {
+    console.error(`Ошибка /${type}:`, error.message);
+  }
+}
+
+bot.onText(/^\/start\b/, async (msg) => {
   await addSubscriber(msg.chat.id);
 
   bot.sendMessage(
     msg.chat.id,
-    'Добро пожаловать в бережное пространство 🤍\n\nПозволь мне мягко возвращать тебя к себе, своему телу и чувственности.'
+    'Добро пожаловать в бережное пространство 🤍\n\nПозволь мне мягко возвращать тебя к себе, своему телу и чувственности.\n\nЕсли захочешь тишины — напиши /stop.'
   );
 });
 
-bot.onText(/\/test/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'Бот работает 🤍');
-});
-
-bot.onText(/\/count/, async (msg) => {
-  const subscribers = await loadSubscribers();
+bot.onText(/^\/stop\b/, async (msg) => {
+  await removeSubscriber(msg.chat.id);
 
   bot.sendMessage(
     msg.chat.id,
-    `Сейчас подписано: ${subscribers.length}`
+    'Послания больше не будут приходить 🤍\n\nТы можешь вернуться в любой момент — просто напиши /start.'
   );
 });
 
-bot.onText(/\/evening/, (msg) => {
-  const message = getRandomMessage('evening');
-
-  sendOneMessage(msg.chat.id, message).catch((error) => {
-    console.error('Ошибка /evening:', error.message);
-  });
+bot.onText(/^\/help\b/, (msg) => {
+  bot.sendMessage(
+    msg.chat.id,
+    'Что я умею:\n\n/start — получать послания\n/stop — приостановить\n/morning, /day, /evening — послание прямо сейчас'
+  );
 });
 
-cron.schedule('0 8 * * *', () => {
-  sendMessageToAll('morning');
-}, { timezone });
+bot.onText(/^\/test\b/, (msg) => {
+  bot.sendMessage(msg.chat.id, 'Бот работает 🤍');
+});
 
-cron.schedule('0 14 * * *', () => {
-  sendMessageToAll('day');
-}, { timezone });
+bot.onText(/^\/count\b/, async (msg) => {
+  const count = await countSubscribers();
 
-cron.schedule('0 22 * * *', () => {
-  sendMessageToAll('evening');
-}, { timezone });
+  bot.sendMessage(
+    msg.chat.id,
+    count === null ? 'Не удалось посчитать 🤍' : `Сейчас подписано: ${count}`
+  );
+});
+
+bot.onText(/^\/morning\b/, (msg) => sendPreview(msg.chat.id, 'morning'));
+bot.onText(/^\/day\b/, (msg) => sendPreview(msg.chat.id, 'day'));
+bot.onText(/^\/evening\b/, (msg) => sendPreview(msg.chat.id, 'evening'));
+
+// Список команд в меню Telegram. /test и /count оставляем служебными.
+bot.setMyCommands([
+  { command: 'start', description: 'Получать послания' },
+  { command: 'stop', description: 'Приостановить послания' },
+  { command: 'morning', description: 'Утреннее послание сейчас' },
+  { command: 'day', description: 'Дневное послание сейчас' },
+  { command: 'evening', description: 'Вечернее послание сейчас' },
+  { command: 'help', description: 'Что я умею' },
+]).catch((error) => {
+  console.error('Не удалось обновить меню команд:', error.message);
+});
+
+cron.schedule('0 8 * * *', () => broadcast('morning'), { timezone });
+cron.schedule('0 14 * * *', () => broadcast('day'), { timezone });
+cron.schedule('0 22 * * *', () => broadcast('evening'), { timezone });
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Необработанная ошибка:', reason);
+});
 
 console.log('Bot started...');
 console.log(`Timezone: ${timezone}`);
