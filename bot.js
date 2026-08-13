@@ -8,7 +8,14 @@ const { addSubscriber, removeSubscriber, countSubscribers } = require('./src/db'
 const { getNextMessage, deckStatus } = require('./src/content');
 const { sendOneMessage, sendMessageToAll } = require('./src/sender');
 const { setAnswer, getAnswer, countToday } = require('./src/mood');
-const { nextQuestion, findOption, randomFreeTextReply } = require('./src/questions');
+const {
+  nextQuestion,
+  lastAskedIndex,
+  findOption,
+  eveningLineFor,
+  randomFreeTextReply,
+  openInvite,
+} = require('./src/questions');
 
 const PORT = process.env.PORT || 3000;
 const timezone = 'Europe/Moscow';
@@ -46,6 +53,14 @@ bot.on('polling_error', (error) => {
 function withQuestion(message) {
   const question = nextQuestion();
 
+  // Открытый вопрос — без кнопок: на него отвечают словами или молча, себе
+  if (!question.options) {
+    return {
+      ...message,
+      text: `${message.text}\n\n${question.text}\n\n${openInvite}`,
+    };
+  }
+
   return {
     ...message,
     text: `${message.text}\n\n${question.text}`,
@@ -60,17 +75,14 @@ function withQuestion(message) {
   };
 }
 
-// Вечернее послание начинается с отклика на то, что она ответила утром
+// Вечернее послание начинается с отклика на то, что она ответила утром —
+// кнопкой или своими словами
 function withEveningIntro(message, chatId) {
-  const answer = getAnswer(chatId);
+  const line = eveningLineFor(getAnswer(chatId));
 
-  if (!answer) return message;
+  if (!line) return message;
 
-  const option = findOption(answer.questionIndex, answer.optionIndex);
-
-  if (!option || !option.evening) return message;
-
-  return { ...message, text: `${option.evening}\n\n${message.text}` };
+  return { ...message, text: `${line}\n\n${message.text}` };
 }
 
 async function broadcast(type) {
@@ -150,9 +162,19 @@ bot.on('callback_query', (query) => {
 bot.on('message', (msg) => {
   if (!msg.text || msg.text.startsWith('/')) return;
 
-  console.log(`Свободный ответ от ${msg.chat.id}`);
+  const chatId = msg.chat.id;
+  const alreadyAnswered = getAnswer(chatId);
+  const question = lastAskedIndex();
 
-  bot.sendMessage(msg.chat.id, randomFreeTextReply()).catch((error) => {
+  // Записываем сам факт ответа, чтобы вечером откликнуться. Если она уже
+  // нажала кнопку, оставляем тот ответ — он точнее.
+  if (!alreadyAnswered && question !== null) {
+    setAnswer(chatId, question, null);
+  }
+
+  console.log(`Свободный ответ от ${chatId}`);
+
+  bot.sendMessage(chatId, randomFreeTextReply()).catch((error) => {
     console.error('Ошибка ответа на сообщение:', error.message);
   });
 });
