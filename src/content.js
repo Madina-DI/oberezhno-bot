@@ -1,7 +1,22 @@
 const path = require('path');
 const messages = require('../messages.json');
+const guest = require('../guest.json');
 
 const ROOT = path.join(__dirname, '..');
+
+// Послания гостя живут отдельным файлом и уходят в свой час — так чужой голос
+// не смешивается с колодой Мадины. Пока active: false, слот молчит.
+const GUEST = 'guest';
+
+function guestIsOn() {
+  return Boolean(guest.active) && Array.isArray(guest.messages) && guest.messages.length > 0;
+}
+
+function poolFor(type) {
+  if (type === GUEST) return guestIsOn() ? guest.messages : [];
+
+  return messages[type] || [];
+}
 
 const FALLBACK = {
   text: 'Послание скоро появится 🤍',
@@ -25,7 +40,7 @@ function shuffle(items) {
 }
 
 function refillDeck(type) {
-  const deck = shuffle(messages[type].map((_, index) => index));
+  const deck = shuffle(poolFor(type).map((_, index) => index));
 
   // Чтобы новая колода не начиналась с того же послания, которым
   // закончилась предыдущая
@@ -36,22 +51,31 @@ function refillDeck(type) {
   decks[type] = deck;
 }
 
-function withAbsoluteImage(message) {
+function withAbsoluteImage(message, type) {
+  // авторство: у послания своё, иначе общее для гостя
+  const isGuest = type === GUEST;
+  const author = message.author || (isGuest ? guest.author : null);
+  const link = message.link || (isGuest ? guest.link : null);
+  const linkLabel = message.linkLabel || (isGuest ? guest.linkLabel : null);
+
   return {
     // у гостевых посланий под текстом стоит имя автора
-    text: message.author ? `${message.text}\n\n— ${message.author}` : message.text,
+    text: author ? `${message.text}\n\n— ${author}` : message.text,
     // путь в messages.json относительный — приводим к абсолютному,
     // чтобы бот не зависел от того, из какой папки его запустили
     image: message.image ? path.join(ROOT, message.image) : null,
-    link: message.link || null,
-    linkLabel: message.linkLabel || null,
+    link: link || null,
+    linkLabel: linkLabel || null,
   };
 }
 
 function getNextMessage(type) {
-  const pool = messages[type];
+  const pool = poolFor(type);
 
-  if (!pool || pool.length === 0) {
+  if (pool.length === 0) {
+    // выключенный гость — это норма, а не поломка: слот просто молчит
+    if (type === GUEST) return null;
+
     console.error(`Нет посланий для типа: ${type}`);
     return FALLBACK;
   }
@@ -63,14 +87,18 @@ function getNextMessage(type) {
   const index = decks[type].shift();
   lastSent[type] = index;
 
-  return withAbsoluteImage(pool[index]);
+  return withAbsoluteImage(pool[index], type);
 }
 
 function deckStatus() {
-  return Object.keys(messages).map((type) => ({
+  const types = [...Object.keys(messages)];
+
+  if (guestIsOn()) types.push(GUEST);
+
+  return types.map((type) => ({
     type,
-    total: messages[type].length,
-    left: decks[type] ? decks[type].length : messages[type].length,
+    total: poolFor(type).length,
+    left: decks[type] ? decks[type].length : poolFor(type).length,
   }));
 }
 

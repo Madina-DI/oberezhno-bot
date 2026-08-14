@@ -55,6 +55,12 @@ bot.on('polling_error', (error) => {
 async function broadcast(type) {
   const message = getNextMessage(type);
 
+  // гостевой слот выключен — просто молчим
+  if (!message) {
+    console.log(`Рассылка ${type} пропущена: посланий нет или гость выключен`);
+    return;
+  }
+
   console.log(`[${new Date().toISOString()}] Sending ${type}: ${message.text}`);
 
   let payload = message;
@@ -82,6 +88,11 @@ async function broadcast(type) {
 // Ручная отправка одного послания тому, кто вызвал команду
 async function sendPreview(chatId, type) {
   const message = getNextMessage(type);
+
+  if (!message) {
+    bot.sendMessage(chatId, 'Гостевые послания сейчас выключены 🤍').catch(() => {});
+    return;
+  }
 
   try {
     if (type === 'morning') {
@@ -220,6 +231,7 @@ bot.onText(/^\/count\b/, async (msg) => {
 bot.onText(/^\/morning\b/, (msg) => sendPreview(msg.chat.id, 'morning'));
 bot.onText(/^\/day\b/, (msg) => sendPreview(msg.chat.id, 'day'));
 bot.onText(/^\/evening\b/, (msg) => sendPreview(msg.chat.id, 'evening'));
+bot.onText(/^\/guest\b/, (msg) => sendPreview(msg.chat.id, 'guest'));
 
 // Список команд в меню Telegram. /test и /count оставляем служебными.
 bot.setMyCommands([
@@ -234,6 +246,7 @@ bot.setMyCommands([
 });
 
 cron.schedule('0 8 * * *', () => broadcast('morning'), { timezone });
+cron.schedule('0 12 * * *', () => broadcast('guest'), { timezone });
 cron.schedule('0 14 * * *', () => broadcast('day'), { timezone });
 cron.schedule('0 22 * * *', () => broadcast('evening'), { timezone });
 

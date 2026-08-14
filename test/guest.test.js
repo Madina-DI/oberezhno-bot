@@ -69,5 +69,39 @@ check('подпись автора добавлена под текстом', bu
 check('ссылка прочитана из messages.json', built.link === guest.link);
 check('у своего послания подписи нет', getNextMessage('day').text === 'Своё послание');
 
+// --- гостевой слот в 12:00 ---
+const guestPath = require.resolve(path.join(ROOT, 'guest.json'));
+const realGuest = require(guestPath);
+
+function reloadContent(guestConfig) {
+  delete require.cache[contentPath];
+  require.cache[guestPath] = { id: guestPath, filename: guestPath, loaded: true, exports: guestConfig };
+  return require(contentPath);
+}
+
+// выключенный гость молчит
+const off = reloadContent({ ...realGuest, active: false });
+check('выключенный гость не отдаёт послание', off.getNextMessage('guest') === null);
+check('выключенный гость не показан в колодах', !off.deckStatus().some(d => d.type === 'guest'));
+check('свои послания при этом работают', off.getNextMessage('morning').text.length > 0);
+
+// включённый гость отдаёт послания со своей подписью и ссылкой
+const on = reloadContent({ ...realGuest, active: true });
+const guestMsg = on.getNextMessage('guest');
+check('включённый гость отдаёт послание', guestMsg !== null);
+check('подпись автора проставилась сама', guestMsg.text.endsWith(`— ${realGuest.author}`));
+check('ссылка автора проставилась сама', guestMsg.link === realGuest.link);
+check('гость появился в колодах', on.deckStatus().some(d => d.type === 'guest' && d.total === realGuest.messages.length));
+
+// вся колода гостя проходит без повторов (с чистой колоды)
+const fresh = reloadContent({ ...realGuest, active: true });
+const seen = new Set();
+for (let i = 0; i < realGuest.messages.length; i++) seen.add(fresh.getNextMessage('guest').text);
+check(`колода гостя: ${realGuest.messages.length} посланий без повторов`, seen.size === realGuest.messages.length);
+
+// пустой список — то же, что выключено
+const empty = reloadContent({ ...realGuest, active: true, messages: [] });
+check('гость без посланий молчит', empty.getNextMessage('guest') === null);
+
 console.log(failed === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛЕНО: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);
