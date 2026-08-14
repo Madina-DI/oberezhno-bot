@@ -15,6 +15,7 @@ const {
   eveningLineFor,
   randomFreeTextReply,
   openInvite,
+  welcome,
 } = require('./src/questions');
 
 const PORT = process.env.PORT || 3000;
@@ -180,12 +181,19 @@ bot.on('message', (msg) => {
 });
 
 bot.onText(/^\/start\b/, async (msg) => {
-  await addSubscriber(msg.chat.id);
+  const chatId = msg.chat.id;
+  const isNew = await addSubscriber(chatId);
 
-  bot.sendMessage(
-    msg.chat.id,
-    'Добро пожаловать в бережное пространство 🤍\n\nПозволь мне мягко возвращать тебя к себе, своему телу и чувственности.\n\nЕсли захочешь тишины — напиши /stop.'
-  );
+  bot.sendMessage(chatId, isNew ? welcome.greeting : welcome.greetingBack)
+    .catch((error) => console.error('Ошибка приветствия:', error.message));
+
+  // Первая практика — отдельным сообщением, с паузой, чтобы читалось
+  // как дыхание, а не как стена текста
+  setTimeout(() => {
+    bot.sendMessage(chatId, welcome.practice).catch((error) => {
+      console.error('Ошибка первой практики:', error.message);
+    });
+  }, (welcome.delaySeconds || 5) * 1000);
 });
 
 bot.onText(/^\/stop\b/, async (msg) => {

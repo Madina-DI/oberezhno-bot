@@ -47,7 +47,7 @@ async function addSubscriber(chatId) {
 
   if (existing) {
     console.log(`Subscriber already exists: ${chatId}`);
-    return;
+    return false;
   }
 
   const { error: insertError } = await supabase
@@ -56,10 +56,11 @@ async function addSubscriber(chatId) {
 
   if (insertError) {
     console.error('Ошибка добавления подписчика:', insertError.message);
-    return;
+    return false;
   }
 
   console.log(`New subscriber added: ${chatId}`);
+  return true;
 }
 
 async function removeSubscriber(chatId) {

@@ -1,4 +1,4 @@
-const { questions, freeText, openInvite } = require('../responses.json');
+const { questions, freeText, openInvite, welcome } = require('../responses.json');
 
 // Вопросы идут по кругу: каждое утро следующий, а не один и тот же
 let cursor = Math.floor(Math.random() * questions.length);
@@ -55,4 +55,5 @@ module.exports = {
   eveningLineFor,
   randomFreeTextReply,
   openInvite,
+  welcome,
 };
