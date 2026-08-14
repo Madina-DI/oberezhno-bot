@@ -5,7 +5,7 @@
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "test": "node test/messages.test.js && node test/start.test.js && node test/source.test.js"
+    "test": "node test/messages.test.js && node test/start.test.js && node test/source.test.js && node test/guest.test.js"
   },
   "keywords": [],
   "author": "",

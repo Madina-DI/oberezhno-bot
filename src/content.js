@@ -38,10 +38,13 @@ function refillDeck(type) {
 
 function withAbsoluteImage(message) {
   return {
-    text: message.text,
+    // у гостевых посланий под текстом стоит имя автора
+    text: message.author ? `${message.text}\n\n— ${message.author}` : message.text,
     // путь в messages.json относительный — приводим к абсолютному,
     // чтобы бот не зависел от того, из какой папки его запустили
     image: message.image ? path.join(ROOT, message.image) : null,
+    link: message.link || null,
+    linkLabel: message.linkLabel || null,
   };
 }
 

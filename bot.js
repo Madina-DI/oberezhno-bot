@@ -14,14 +14,12 @@ const { getNextMessage, deckStatus } = require('./src/content');
 const { sendOneMessage, sendMessageToAll } = require('./src/sender');
 const { setAnswer, getAnswer, countToday } = require('./src/mood');
 const {
-  nextQuestion,
   lastAskedIndex,
   findOption,
-  eveningLineFor,
   randomFreeTextReply,
-  openInvite,
   welcome,
 } = require('./src/questions');
+const { withQuestion, withEveningIntro, withLinkButton } = require('./src/format');
 
 const PORT = process.env.PORT || 3000;
 const timezone = 'Europe/Moscow';
@@ -54,43 +52,6 @@ bot.on('polling_error', (error) => {
   console.error('Ошибка polling:', error.message);
 });
 
-// Утреннее послание заканчивается вопросом с кнопками. Вопрос каждое утро
-// новый — про чувства, про внимание, про тело.
-function withQuestion(message) {
-  const question = nextQuestion();
-
-  // Открытый вопрос — без кнопок: на него отвечают словами или молча, себе
-  if (!question.options) {
-    return {
-      ...message,
-      text: `${message.text}\n\n${question.text}\n\n${openInvite}`,
-    };
-  }
-
-  return {
-    ...message,
-    text: `${message.text}\n\n${question.text}`,
-    replyMarkup: {
-      inline_keyboard: [
-        question.options.map((option, optionIndex) => ({
-          text: option.label,
-          callback_data: `q:${question.index}:${optionIndex}`,
-        })),
-      ],
-    },
-  };
-}
-
-// Вечернее послание начинается с отклика на то, что она ответила утром —
-// кнопкой или своими словами
-function withEveningIntro(message, chatId) {
-  const line = eveningLineFor(getAnswer(chatId));
-
-  if (!line) return message;
-
-  return { ...message, text: `${line}\n\n${message.text}` };
-}
-
 async function broadcast(type) {
   const message = getNextMessage(type);
 
@@ -102,7 +63,9 @@ async function broadcast(type) {
     payload = withQuestion(message);
   } else if (type === 'evening') {
     console.log(`Ответили утром: ${countToday()}`);
-    payload = (chatId) => withEveningIntro(message, chatId);
+    payload = (chatId) => withLinkButton(withEveningIntro(message, chatId));
+  } else {
+    payload = withLinkButton(message);
   }
 
   try {
@@ -124,9 +87,9 @@ async function sendPreview(chatId, type) {
     if (type === 'morning') {
       await sendOneMessage(bot, chatId, withQuestion(message));
     } else if (type === 'evening') {
-      await sendOneMessage(bot, chatId, withEveningIntro(message, chatId));
+      await sendOneMessage(bot, chatId, withLinkButton(withEveningIntro(message, chatId)));
     } else {
-      await sendOneMessage(bot, chatId, message);
+      await sendOneMessage(bot, chatId, withLinkButton(message));
     }
   } catch (error) {
     console.error(`Ошибка /${type}:`, error.message);

@@ -53,19 +53,7 @@ global.Date = RealDate;
 
 // --- сборка утреннего и вечернего послания (логика из bot.js) ---
 const responses = require(path.join(ROOT, 'responses.json'));
-const withQuestion = (m) => {
-  const q = nextQuestion();
-  if (!q.options) return { ...m, text: `${m.text}\n\n${q.text}\n\n${openInvite}` };
-  return {
-    ...m,
-    text: `${m.text}\n\n${q.text}`,
-    replyMarkup: { inline_keyboard: [q.options.map((o, oi) => ({ text: o.label, callback_data: `q:${q.index}:${oi}` }))] },
-  };
-};
-const withEveningIntro = (m, chatId) => {
-  const line = eveningLineFor(getAnswer(chatId));
-  return line ? { ...m, text: `${line}\n\n${m.text}` } : m;
-};
+const { withQuestion, withEveningIntro, withLinkButton } = require(path.join(ROOT, 'src/format.js'));
 
 // проходим весь круг вопросов и проверяем оба формата
 const builtByIndex = new Map();
