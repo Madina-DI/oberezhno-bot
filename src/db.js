@@ -33,7 +33,15 @@ async function countSubscribers() {
   return count;
 }
 
-async function addSubscriber(chatId) {
+// Колонки source может не быть — она добавляется в дашборде Supabase.
+// Пока её нет, метка просто не сохраняется, подписка при этом работает.
+let sourceColumnMissing = false;
+
+function isMissingSourceColumn(error) {
+  return error.code === '42703' || /source/i.test(error.message || '');
+}
+
+async function addSubscriber(chatId, source) {
   const { data: existing, error: selectError } = await supabase
     .from('subscribers')
     .select('chat_id')
@@ -50,17 +58,50 @@ async function addSubscriber(chatId) {
     return false;
   }
 
-  const { error: insertError } = await supabase
-    .from('subscribers')
-    .insert([{ chat_id: chatId }]);
+  const row = { chat_id: chatId };
+
+  if (source && !sourceColumnMissing) row.source = source;
+
+  let { error: insertError } = await supabase.from('subscribers').insert([row]);
+
+  if (insertError && row.source && isMissingSourceColumn(insertError)) {
+    console.warn(
+      'В таблице subscribers нет колонки source — метка не сохранена. ' +
+      'Добавь её в Supabase: alter table subscribers add column source text;'
+    );
+    sourceColumnMissing = true;
+
+    ({ error: insertError } = await supabase
+      .from('subscribers')
+      .insert([{ chat_id: chatId }]));
+  }
 
   if (insertError) {
     console.error('Ошибка добавления подписчика:', insertError.message);
     return false;
   }
 
-  console.log(`New subscriber added: ${chatId}`);
+  const savedSource = source && !sourceColumnMissing;
+  console.log(`New subscriber added: ${chatId}${savedSource ? ` (откуда: ${source})` : ''}`);
   return true;
+}
+
+// Откуда пришли подписчицы. Пустой список, если колонки source ещё нет.
+async function sourceBreakdown() {
+  const { data, error } = await supabase.from('subscribers').select('source');
+
+  if (error) return [];
+
+  const counts = new Map();
+
+  for (const row of data) {
+    const key = row.source || 'без метки';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([source, count]) => ({ source, count }));
 }
 
 async function removeSubscriber(chatId) {
@@ -83,4 +124,5 @@ module.exports = {
   countSubscribers,
   addSubscriber,
   removeSubscriber,
+  sourceBreakdown,
 };

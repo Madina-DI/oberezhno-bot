@@ -4,7 +4,12 @@ const http = require('http');
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
 
-const { addSubscriber, removeSubscriber, countSubscribers } = require('./src/db');
+const {
+  addSubscriber,
+  removeSubscriber,
+  countSubscribers,
+  sourceBreakdown,
+} = require('./src/db');
 const { getNextMessage, deckStatus } = require('./src/content');
 const { sendOneMessage, sendMessageToAll } = require('./src/sender');
 const { setAnswer, getAnswer, countToday } = require('./src/mood');
@@ -180,9 +185,19 @@ bot.on('message', (msg) => {
   });
 });
 
+// Метка из ссылки вида t.me/oberezhno_women_bot?start=reels — так видно,
+// откуда пришла женщина. Telegram разрешает буквы, цифры, дефис и подчёркивание.
+function parseSource(text) {
+  const match = /^\/start(?:@\S+)?\s+(\S+)/.exec(text || '');
+
+  if (!match) return null;
+
+  return /^[A-Za-z0-9_-]{1,64}$/.test(match[1]) ? match[1] : null;
+}
+
 bot.onText(/^\/start\b/, async (msg) => {
   const chatId = msg.chat.id;
-  const isNew = await addSubscriber(chatId);
+  const isNew = await addSubscriber(chatId, parseSource(msg.text));
 
   bot.sendMessage(chatId, isNew ? welcome.greeting : welcome.greetingBack)
     .catch((error) => console.error('Ошибка приветствия:', error.message));
@@ -218,20 +233,25 @@ bot.onText(/^\/test\b/, (msg) => {
 
 bot.onText(/^\/count\b/, async (msg) => {
   const count = await countSubscribers();
+  const sources = await sourceBreakdown();
   const decks = deckStatus()
     .map(({ type, total, left }) => `${type}: осталось ${left} из ${total}`)
     .join('\n');
 
-  bot.sendMessage(
-    msg.chat.id,
-    [
-      count === null ? 'Не удалось посчитать 🤍' : `Сейчас подписано: ${count}`,
-      `Ответили сегодня: ${countToday()}`,
-      '',
-      'Колода посланий:',
-      decks,
-    ].join('\n')
-  );
+  const lines = [
+    count === null ? 'Не удалось посчитать 🤍' : `Сейчас подписано: ${count}`,
+    `Ответили сегодня: ${countToday()}`,
+  ];
+
+  // Показываем разбивку, только если метки вообще проставлены
+  if (sources.some(({ source }) => source !== 'без метки')) {
+    lines.push('', 'Откуда пришли:');
+    lines.push(...sources.map(({ source, count: n }) => `${source}: ${n}`));
+  }
+
+  lines.push('', 'Колода посланий:', decks);
+
+  bot.sendMessage(msg.chat.id, lines.join('\n'));
 });
 
 bot.onText(/^\/morning\b/, (msg) => sendPreview(msg.chat.id, 'morning'));
